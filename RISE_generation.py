@@ -6,32 +6,24 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 torch.backends.cudnn.deterministic = True
 
-# Jacob-gil imports
-from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
-
 # In-package imports
-from lib import dict_cam
 from lib.data import imagenet_tester, INet_Evaluator
+from lib.RISE import RISEBatch
 
 from models import model_selection
-from models.utils import cam_targetter
 
 # Package imports
 import os
 osp = os.path
 osj = osp.join
 
+import sys
+epsilon = sys.float_info.epsilon
 import argparse
 import numpy as np
+import pdb
 
 
-
-# ========================================================================
-def reshape_transform(tensor, height=14, width=14):
-    result = tensor[:, 1:, :].reshape(tensor.size(0),
-                                      height, width, tensor.size(2))
-    result = result.transpose(2, 3).transpose(1, 2)
-    return result
 # ========================================================================
 def main():
     parser = argparse.ArgumentParser()
@@ -39,11 +31,11 @@ def main():
     parser.add_argument('--use_gpu', action='store_true', default=False,
                         help='Using GPU Acceleration?')
     # Data Initialization
-    parser.add_argument('--root_data', default=osj('imagenet_2012_cr', 
+    parser.add_argument('--root_data', default=osj('imagenet_2012_cr',
                         'validation', 'val'),
                         type=str, help='Path to data root')
     parser.add_argument('--path_data', default=osj('data',
-                        'revisited_imagenet_2012_val.csv'), type=str,
+                        'imagenet_val_2012_raw.csv'), type=str,
                         help='Path to csv file with data and annotations')
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Images per batch')
@@ -54,7 +46,7 @@ def main():
     # Model Initialization
     parser.add_argument('--model', default='resnet50', type=str,
                         help='Model to Evaluate')
-    parser.add_argument('--method', default='gradcam', type=str,
+    parser.add_argument('--method', default='RISE', type=str,
                         help='Saliency Approach')
     parser.add_argument('--store_dir', default='SaliencyMaps', type=str,
                         help='Where to store the saliency maps')
@@ -95,55 +87,42 @@ def main():
     # Model Selection, Targetting and Wrapping.
     model = model_selection(args.model)
     model = model.to(args.device).eval()
-    # Checking for reshaping
-    if 'transformer' in str(type(model)).lower():
-        reshape = reshape_transform
-    else:
-        reshape = None
-    target = cam_targetter(model)
-    cam_approach = dict_cam[args.method]
-
-    # Spetial parameters for CAM in CNN or transformer
-    if 'transformer' in args.method: # Transformer-based methods
-        cam = cam_approach(model, args.device, target, max_iter=50,
-                           reshape_transform=reshape,
-                           learning_rate=0.1, name_f='logit_predict',
-                           name_loss='plain', name_norm='max_min')
-
-    else: # CNN
-        cam = cam_approach(model=model, target_layers=target,
-                           use_cuda=args.use_gpu,
-                           reshape_transform=reshape)
-    
+    # Selecting attributions
+    explainer = RISEBatch(model, (224, 224), args.batch_size)
+    explainer.generate_masks(N=32, s=4, p1=0.1, savepath=args.store_dir)
     # Loading data
     loaded = DataLoader(experimental_dataset, batch_size=args.batch_size,
                         num_workers=0, shuffle=False)
     softmax = nn.Softmax(dim=-1)
     for images, labels, names in loaded:
         # Retrieving the batch
-        images = images.to(torch.cuda.current_device())
-        labels = labels.to(torch.cuda.current_device())
+        images = images.to(args.device)
+        labels = labels.to(args.device)
         # Forward through the model to get logits
         outputs = model(images)
         probs = softmax(outputs)
         worst = torch.argmin(probs, dim=-1)
         preds = torch.argmax(probs, dim=-1)
-        # Bizarre Override. Adapted to use groundtruth labels as in repo.
+        # Using selected labels
         if args.lab == 'predicted':
-            targets = [ClassifierOutputTarget(label) \
-                       for label in preds.cpu().numpy().tolist()]
+            targets = preds
         elif args.lab == 'least':
-            targets = [ClassifierOutputTarget(label) \
-                       for label in worst.cpu().numpy().tolist()]
+            targets = worst
         else:
-            targets = [ClassifierOutputTarget(label) \
-                       for label in labels.tolist()]
+            targets = labels
 
-        salient = cam(images, targets)
+        # Forwarding through the explainer
+        salient = explainer(images)
+        salient_min = salient.amin(dim=(2, 3), keepdim=True)
+        salient_max = salient.amax(dim=(2, 3), keepdim=True)
+        #pdb.set_trace()
+        salient = (salient-salient_min)/(salient_max-salient_min)
         for idx in range(len(salient)):
-            saliency = salient[idx] # Storing index
+            saliency = salient[idx, targets[idx], :, :] # Storing index
+            saliency = saliency.detach().cpu().numpy()
             name = names[idx].replace('.JPEG', '') # Name of the image
             np.save(osj(args.store_dir, '{}.npy').format(name), saliency)
+        del salient, saliency
     # ====================================================================
 
 if __name__ == '__main__':

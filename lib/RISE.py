@@ -11,6 +11,10 @@ class RISE(nn.Module):
         self.model = model
         self.input_size = input_size
         self.gpu_batch = gpu_batch
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda:0')
+        else:
+            self.device = torch.device('cpu')
 
     def generate_masks(self, N, s, p1, savepath='masks.npy'):
         cell_size = np.ceil(np.array(self.input_size) / s)
@@ -31,7 +35,7 @@ class RISE(nn.Module):
         self.masks = self.masks.reshape(-1, 1, *self.input_size)
         np.save(savepath, self.masks)
         self.masks = torch.from_numpy(self.masks).float()
-        self.masks = self.masks.cuda()
+        self.masks = self.masks.to(self.device)
         self.N = N
         self.p1 = p1
 
