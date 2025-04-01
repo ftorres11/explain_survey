@@ -34,19 +34,17 @@ for salient in list_options:
     if not osp.exists(path_sal):
         os.makedirs(path_sal)
     for instance in imgs:
-        smap = np.load(osj(path_src, instance.replace('.JPEG', '.npy')))
-        orig = io.imread(osj(path_images, instance))
-
-        if len(smap.shape)>3:
-            smap = smap[0]
-            smap = np.moveaxis(smap, 0, -1)
-        if smap.shape[-1] == 1:
-            smap = smap[:,:,0]
-        smap = ski.transform.resize(smap, (orig.shape[0], orig.shape[1]))
-        smap = (smap*255).astype(np.uint8)
-        #pdb.set_trace()
-
         try:
+            smap = np.load(osj(path_src, instance.replace('.JPEG', '.npy')))
+            orig = io.imread(osj(path_images, instance))
+            
+            if len(smap.shape)>3:
+                smap = smap[0]
+                smap = np.moveaxis(smap, 0, -1)
+            if smap.shape[-1] == 1:
+                smap = smap[:,:,0]
+            smap = ski.transform.resize(smap, (orig.shape[0], orig.shape[1]))
+            smap = (smap*255).astype(np.uint8)
             io.imwrite(osj(path_sal, instance), smap)
-        except ValueError:
-            pdb.set_trace()
+        except:
+            continue

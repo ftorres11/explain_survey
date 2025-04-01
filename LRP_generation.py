@@ -12,7 +12,7 @@ torch.backends.cudnn.deterministic = True
 from captum.attr import LRP
 
 # In-package imports
-from lib.data import imagenet_tester, INet_Evaluator
+from lib.data import imagenet_tester, INet_Evaluator, outlier_deprocessor
 
 from models import model_selection
 
@@ -116,6 +116,7 @@ def main():
         img = np.transpose(img, (0, 2, 3, 1))
         # LRP Forwarding
         saliency = lrp.attribute(images, target=int(targets[0])).detach()
+        saliency = outlier_deprocessor(saliency)
         # Deprocessing LRP saliency
         #saliency = saliency.pow(2).sum(axis=1).sqrt().squeeze().detach()
         saliency = saliency.cpu().numpy()

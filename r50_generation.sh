@@ -12,7 +12,7 @@
 #python LIME_generation.py --model resnet50 --store_dir SaliencyMaps/ImageNet/ResNet50/Res_4   --path_data data/200classes_5inst.csv --lab least
 
 # LRP
-#python LRP_generation.py --model resnet50 --store_dir SaliencyMaps/ImageNet/ResNet50/Res_4   --path_data data/200classes_5inst.csv --root_data ../../ILSVRC_2012/val
+python LRP_generation.py --model resnet50 --store_dir SaliencyMaps/ImageNet/ResNet50/Res_4   --path_data data/200classes_5inst.csv --root_data ../../ILSVRC_2012/val
 #python LRP_generation.py --model resnet50 --store_dir SaliencyMaps/ImageNet/ResNet50/Res_4   --path_data data/200classes_5inst.csv --lab predicted
 #python LRP_generation.py --model resnet50 --store_dir SaliencyMaps/ImageNet/ResNet50/Res_4   --path_data data/200classes_5inst.csv --lab least
 
@@ -34,7 +34,7 @@
 #srun python cam_generation.py --batch_size 1 --model resnet50 --method gradcampp --store_dir SaliencyMaps/ImageNet/ResNet50/Res_4  --lab least
 
 # Score-CAM
-python cam_generation.py --batch_size 4 --model resnet50 --method scorecam --store_dir SaliencyMaps/ImageNet/ResNet50/   --path_data data/200classes_5inst.csv --root_data ../../ILSVRC_2012/val
+#python cam_generation.py --batch_size 4 --model resnet50 --method scorecam --store_dir SaliencyMaps/ImageNet/ResNet50/   --path_data data/200classes_5inst.csv --root_data ../../ILSVRC_2012/val
 #srun python cam_generation.py --batch_size 1 --model resnet50 --method scorecam --store_dir SaliencyMaps/ImageNet/ResNet50/Res_4  --lab predicted
 #srun python cam_generation.py --batch_size 1 --model resnet50 --method scorecam --store_dir SaliencyMaps/ImageNet/ResNet50/Res_4  --lab least
 
