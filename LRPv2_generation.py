@@ -1,5 +1,5 @@
 # -*- coding: utf -8 -*-
-
+# Author: Felipe Torres Figueroa
 # Torch Imports
 import torch
 import torch.nn as nn
@@ -7,14 +7,14 @@ from torch.utils.data import DataLoader
 torch.backends.cudnn.deterministic = True
 
 # Jacob-gil imports
-from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+
+# Captum imports
+from lib.lrp.lrp import LRPModel as LRP
 
 # In-package imports
-from lib import dict_cam
-from lib.data import imagenet_tester, INet_Evaluator
+from lib.data import imagenet_tester, INet_Evaluator, outlier_deprocessor
 
 from models import model_selection
-from models.utils import cam_targetter
 
 # Package imports
 import os
@@ -23,15 +23,11 @@ osj = osp.join
 
 import argparse
 import numpy as np
+from sklearn.utils import check_random_state
+import sys
+epsilon = sys.float_info.epsilon
 
 
-
-# ========================================================================
-def reshape_transform(tensor, height=14, width=14):
-    result = tensor[:, 1:, :].reshape(tensor.size(0),
-                                      height, width, tensor.size(2))
-    result = result.transpose(2, 3).transpose(1, 2)
-    return result
 # ========================================================================
 def main():
     parser = argparse.ArgumentParser()
@@ -43,10 +39,8 @@ def main():
                         'validation', 'val'),
                         type=str, help='Path to data root')
     parser.add_argument('--path_data', default=osj('data',
-                        'revisited_imagenet_2012_val.csv'), type=str,
+                        'imagenet_val_2012_raw.csv'), type=str,
                         help='Path to csv file with data and annotations')
-    parser.add_argument('--batch_size', default=64, type=int,
-                        help='Images per batch')
     parser.add_argument('--fraction', default=None, type=float,
                         help='Fraction of the dataset to generate?')
     parser.add_argument('--seed', default=None, type=int,
@@ -54,8 +48,6 @@ def main():
     # Model Initialization
     parser.add_argument('--model', default='resnet50', type=str,
                         help='Model to Evaluate')
-    parser.add_argument('--method', default='gradcam', type=str,
-                        help='Saliency Approach')
     parser.add_argument('--store_dir', default='SaliencyMaps', type=str,
                         help='Where to store the saliency maps')
     parser.add_argument('--lab', default='groundtruth', type=str,
@@ -65,6 +57,7 @@ def main():
     # ====================================================================
     # Checking parsed arguments
     prediction = args.lab
+    args.method = 'LRPv2'
     args.store_dir = osj(args.store_dir, args.method, prediction)
     if not osp.exists(args.store_dir):
         os.makedirs(args.store_dir)
@@ -92,37 +85,20 @@ def main():
 
     transform = imagenet_tester(256, 224)
     experimental_dataset = INet_Evaluator(args.root_data, data, transform)
+
     # Model Selection, Targetting and Wrapping.
     model = model_selection(args.model)
     model = model.to(args.device).eval()
-    # Checking for reshaping
-    if 'transformer' in str(type(model)).lower():
-        reshape = reshape_transform
-    else:
-        reshape = None
-    target = cam_targetter(model)
-    cam_approach = dict_cam[args.method]
-
-    # Spetial parameters for CAM in CNN or transformer
-    if 'transformer' in args.method: # Transformer-based methods
-        cam = cam_approach(model, args.device, target, max_iter=50,
-                           reshape_transform=reshape,
-                           learning_rate=0.1, name_f='logit_predict',
-                           name_loss='plain', name_norm='max_min')
-
-    else: # CNN
-        cam = cam_approach(model=model, target_layers=target,
-                           use_cuda=args.use_gpu,
-                           reshape_transform=reshape)
-    
+    lrp = LRP(model)
     # Loading data
-    loaded = DataLoader(experimental_dataset, batch_size=args.batch_size,
+    loaded = DataLoader(experimental_dataset, batch_size=1,
                         num_workers=0, shuffle=False)
     softmax = nn.Softmax(dim=-1)
     for images, labels, names in loaded:
         # Retrieving the batch
-        images = images.to(torch.cuda.current_device())
-        labels = labels.to(torch.cuda.current_device())
+        images = images.to(args.device)
+        bsz, _, wdth, hght = images.shape
+        labels = labels.to(args.device)
         # Forward through the model to get logits
         outputs = model(images)
         probs = softmax(outputs)
@@ -130,20 +106,25 @@ def main():
         preds = torch.argmax(probs, dim=-1)
         # Bizarre Override. Adapted to use groundtruth labels as in repo.
         if args.lab == 'predicted':
-            targets = [ClassifierOutputTarget(label) \
-                       for label in preds.cpu().numpy().tolist()]
+            targets = preds.cpu().numpy()
         elif args.lab == 'least':
-            targets = [ClassifierOutputTarget(label) \
-                       for label in worst.cpu().numpy().tolist()]
+            targets = worst.cpu().numpy()
         else:
-            targets = [ClassifierOutputTarget(label) \
-                       for label in labels.tolist()]
-
-        salient = cam(images, targets)
-        for idx in range(len(salient)):
-            saliency = salient[idx] # Storing index
-            name = names[idx].replace('.JPEG', '') # Name of the image
-            np.save(osj(args.store_dir, '{}.npy').format(name), saliency)
+            targets = labels.cpu().numpy()
+        # lrp preparations
+        img = images.cpu().numpy()
+        img = np.transpose(img, (0, 2, 3, 1))
+        # LRP Forwarding
+        saliency = lrp.forward(images, target=int(targets[0])).detach()
+        #import pdb
+        #pdb.set_trace()
+        saliency = outlier_deprocessor(saliency)
+        # Deprocessing LRP saliency
+        saliency = saliency.cpu().numpy()
+        saliency = (saliency-saliency.min())/\
+                   (saliency.max()-saliency.min()+epsilon)
+        name = names[0].replace('.JPEG', '') # Name of the image
+        np.save(osj(args.store_dir, '{}.npy').format(name), saliency)
     # ====================================================================
 
 if __name__ == '__main__':

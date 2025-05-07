@@ -10,7 +10,7 @@ torch.backends.cudnn.deterministic = True
 # Jacob-gil imports
 
 # In-package imports
-from models.utils import GuidedBackPropReLU, GBP_ReLU
+import shap
 from lib.data import (imagenet_tester, INet_Evaluator,
                       outlier_deprocessor, smooth_deprocessor)
 
@@ -20,6 +20,8 @@ from models import model_selection
 import os
 osp = os.path
 osj = osp.join
+import pdb
+
 
 import sys
 epsilon = sys.float_info.epsilon 
@@ -39,7 +41,9 @@ def recursive_relu_apply(module_top):
     for idx, module in module_top._modules.items():
         recursive_relu_apply(module)
         if module.__class__.__name__ == 'ReLU':
-            module_top._modules[idx] = GBP_ReLU()
+            #pdb.set_trace()
+            module_top._modules[idx] = nn.ReLU(inplace=False)
+            #module_top._modules[idx] = GBP_ReLU()
 
 # ========================================================================
 def main():
@@ -63,10 +67,8 @@ def main():
     # Model Initialization
     parser.add_argument('--model', default='resnet50', type=str,
                         help='Model to Evaluate')
-    parser.add_argument('--method', default='backprop', type=str,
+    parser.add_argument('--method', default='SHAP', type=str,
                         help='Saliency Approach')
-    parser.add_argument('--norm', default='outlier', type=str,
-                        help='Gradient deprocessing')
     parser.add_argument('--store_dir', default='SaliencyMaps', type=str,
                         help='Where to store the saliency maps')
     parser.add_argument('--lab', default='groundtruth', type=str,
@@ -77,8 +79,8 @@ def main():
     # Checking parsed arguments
     root = copy.deepcopy(args.store_dir)
     prediction = args.lab
-    args.store_dir = osj(args.store_dir, '{}_{}'.format(args.method, 
-                         args.norm), prediction)
+    args.store_dir = osj(args.store_dir, '{}'.format(args.method), 
+                         prediction)
     if not osp.exists(args.store_dir):
         os.makedirs(args.store_dir)
 
@@ -107,40 +109,33 @@ def main():
     experimental_dataset = INet_Evaluator(args.root_data, data, transform)
     # Model Selection, Targetting and Wrapping.
     model = model_selection(args.model)
-    model = model.to(args.device)  
-
-    if args.method == 'guidedbackprop':
-        recursive_relu_apply(model)
+    if 'resnet' in str(type(model)).lower():
+        # pdb.set_trace()
+        from models.resnet import dict_models
+        model = dict_models[args.model]()
+    model = model.to(args.device) 
+    recursive_relu_apply(model)
+    model.eval()
 
     # Loading data
     loaded = DataLoader(experimental_dataset, batch_size=args.batch_size,
-                        num_workers=0, shuffle=False)
+                        num_workers=0, shuffle=True)
 
     softmax = nn.Softmax(dim=-1)
     for images, labels, names in loaded:
         # Retrieving the batch
-        images = images.to(torch.cuda.current_device())
-        images = images.requires_grad_(True)
-        labels = labels.to(torch.cuda.current_device())
-        # Forward through the model to get logits
-        outputs = model(images)
-        probs = softmax(outputs)
-        preds = torch.argmax(probs, dim=-1)
-        worst = torch.argmin(probs, dim=-1)
-        # Backward pass
-        if args.lab == 'predicted':
-            outputs[torch.arange(len(labels)), preds].mean().backward()
-        elif args.lab == 'least':
-            outputs[torch.arange(len(labels)), worst].mean().backward()
-        else:
-            outputs[torch.arange(len(labels)), labels].mean().backward()
-        grads = images.grad.detach()
-        salient = dict_deprocess[args.norm](grads).cpu().numpy()
+        images = images.to(args.device)
+        labels = labels.to(args.device)
+        background, _, _ = next(iter(loaded))
+        background = background.to(args.device)
+
+        explainer = shap.DeepExplainer(model, background)
+        shap_values = explainer.shap_values(images)
+        #pdb.set_trace()
+        #shap_values = explainer(images, max_evals=100)
    
         # Bizarre Override. Adapted to use groundtruth labels as in repo.
-        model.zero_grad()
-        images.grad = None
-
+        pdb.set_trace()
         for idx in range(len(salient)):
             saliency = salient[idx] # Storing index
             saliency = saliency.transpose((1, 2, 0))

@@ -3,9 +3,20 @@
 *.pyc
 *.pyo
 *.backup
-*.swp
 *.json
 *.tar.gz
 *.zip
+
+# Directories
+SaliencyMaps
+Deprocessed
+Overlapped
+Heatmapped
+
 # C extensions
 *.so
+
+# Vim savestates
+*.swo
+*.swp
+

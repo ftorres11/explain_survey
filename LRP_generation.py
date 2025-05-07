@@ -9,16 +9,10 @@ torch.backends.cudnn.deterministic = True
 # Jacob-gil imports
 
 # Captum imports
-from captum.attr import Lime, LimeBase
-from captum._utils.models.linear_model import (SkLearnLinearRegression,
-                                               SkLearnLasso)
-from captum.attr._core.lime import get_exp_kernel_similarity_function
-
-# Nat LIME imports
-from lime.wrappers.scikit_image import SegmentationAlgorithm
+from captum.attr import LRP
 
 # In-package imports
-from lib.data import imagenet_tester, INet_Evaluator
+from lib.data import imagenet_tester, INet_Evaluator, outlier_deprocessor
 
 from models import model_selection
 
@@ -63,7 +57,7 @@ def main():
     # ====================================================================
     # Checking parsed arguments
     prediction = args.lab
-    args.method = 'LIME'
+    args.method = 'LRP'
     args.store_dir = osj(args.store_dir, args.method, prediction)
     if not osp.exists(args.store_dir):
         os.makedirs(args.store_dir)
@@ -95,25 +89,16 @@ def main():
     # Model Selection, Targetting and Wrapping.
     model = model_selection(args.model)
     model = model.to(args.device).eval()
-
-    # LIME defn and hparams
-    exp_eucl_dist = get_exp_kernel_similarity_function('euclidean',
-                        kernel_width=1000)
-    LIME = Lime(model, interpretable_model=SkLearnLasso(alpha=0.08),
-                similarity_func=exp_eucl_dist)
-    segmentation_fn = SegmentationAlgorithm('quickshift', kernel_size=4,
-           max_dist=200, ratio=0.2,
-          random_seed=check_random_state(args.seed).randint(0, high=1000))
-    
+    lrp = LRP(model)
     # Loading data
     loaded = DataLoader(experimental_dataset, batch_size=1,
                         num_workers=0, shuffle=False)
     softmax = nn.Softmax(dim=-1)
     for images, labels, names in loaded:
         # Retrieving the batch
-        images = images.to(torch.cuda.current_device())
+        images = images.to(args.device)
         bsz, _, wdth, hght = images.shape
-        labels = labels.to(torch.cuda.current_device())
+        labels = labels.to(args.device)
         # Forward through the model to get logits
         outputs = model(images)
         probs = softmax(outputs)
@@ -126,18 +111,14 @@ def main():
             targets = worst.cpu().numpy()
         else:
             targets = labels.cpu().numpy()
-        # LIME preparations
+        # lrp preparations
         img = images.cpu().numpy()
         img = np.transpose(img, (0, 2, 3, 1))
-        segments = segmentation_fn(img[0])
-        segments = torch.from_numpy(segments).unsqueeze(0).to(args.device)
-        n_interpret_features = len(segments.unique())
-        # LIME Forwarding
-        saliency = LIME.attribute(images, target=int(targets[0]), 
-                       feature_mask=segments, n_samples=40,
-                       perturbations_per_eval=16, show_progress=True)
-        # Deprocessing LIME saliency
-        saliency = saliency.pow(2).sum(axis=1).sqrt().squeeze().detach()
+        # LRP Forwarding
+        saliency = lrp.attribute(images, target=int(targets[0])).detach()
+        import pdb
+        saliency = outlier_deprocessor(saliency)
+        # Deprocessing LRP saliency
         saliency = saliency.cpu().numpy()
         saliency = (saliency-saliency.min())/\
                    (saliency.max()-saliency.min()+epsilon)
