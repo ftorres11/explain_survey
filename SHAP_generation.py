@@ -109,12 +109,7 @@ def main():
     experimental_dataset = INet_Evaluator(args.root_data, data, transform)
     # Model Selection, Targetting and Wrapping.
     model = model_selection(args.model)
-    if 'resnet' in str(type(model)).lower():
-        # pdb.set_trace()
-        from models.resnet import dict_models
-        model = dict_models[args.model]()
     model = model.to(args.device) 
-    recursive_relu_apply(model)
     model.eval()
 
     # Loading data

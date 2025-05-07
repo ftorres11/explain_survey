@@ -12,7 +12,6 @@ path_saliency = osj('SaliencyMaps', 'ImageNet', 'VGG16_BN')
 path_images = osj('..', '..', 'ILSVRC_2012', 'val')
 path_data = osj('data', '200classes_5inst.csv')
 path_storage = osj('Deprocessed', 'ImageNet', 'VGG16_BN')
-
 list_options = os.listdir(path_saliency)
 
 with open(path_data, 'r') as data:
